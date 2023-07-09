@@ -14,34 +14,47 @@ from torchvision import datasets
 import matplotlib.pyplot as plt
 import torch.optim as optim
 import os
-from generator import Generator
-from discriminator import Discriminator
+from generator import Generator, ConvGenerator, DeepConvGenerator
+from discriminator import Discriminator, ConvDiscriminator, LightConvDiscriminator
 
 
 ## hyper params
+SEED = 42
 BATCH_SIZE = 64 * 40
-EPOCHS = 30
+EPOCHS = 200
 LEARNING_RATE = 1e-4
-INFERENCE_INTERVAL = 5
-OPTIM = "Adam"
-EXP_NAME = "test"
+INFERENCE_INTERVAL = 10
+OPTIM = "AdamW"
+EXP_NAME = "LatentDim2048_DeepConvGenerator_LightConvDiscriminator"
+SAVE_TAG = True
+LATENT_DIM = 2048
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-latent_vector_size = 100
 
 transform = transforms.Compose(
     [transforms.ToTensor(),
-     transforms.Normalize(mean=0.2860, std=0.3530)]
+     transforms.Normalize(mean=0.2860, std=0.3530)
+     ]
 )
 
-
+def seed_everything(seed: int):
+    import random, os
+    import numpy as np
+    import torch
+    
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
 
 # for update generator
 def generator_step(batch_size, generator, discriminator, optim_g:torch.optim.Optimizer, criterion:nn.BCELoss):
     optim_g.zero_grad()
     
-    z = Variable(torch.randn(batch_size, latent_vector_size)).to(device)
-    
+    z = Variable(torch.randn(batch_size, LATENT_DIM)).to(device)
     fake_imgs = generator(z)
     preds = discriminator(fake_imgs)
     
@@ -72,7 +85,7 @@ def discriminator_step(generator, discriminator, optim_d, criterion:nn.BCELoss, 
     loss_real = criterion(preds, Variable(torch.ones(sample_batch_size)).unsqueeze(dim=1).to(device))
 
     # fake loss
-    z = Variable(torch.randn(sample_batch_size, latent_vector_size)).to(device)
+    z = Variable(torch.randn(sample_batch_size, LATENT_DIM)).to(device)
     
     fake_imgs = generator(z)
     preds = discriminator(fake_imgs)
@@ -80,7 +93,7 @@ def discriminator_step(generator, discriminator, optim_d, criterion:nn.BCELoss, 
     loss_fake = criterion(preds, 
                           Variable(torch.zeros(sample_batch_size)).unsqueeze(dim=1).to(device))
     
-    loss_d = loss_real + loss_fake
+    loss_d = (loss_real + loss_fake) * 0.5 # mean
     loss_d.backward()
     optim_d.step()
     return loss_d.data
@@ -88,16 +101,19 @@ def discriminator_step(generator, discriminator, optim_d, criterion:nn.BCELoss, 
     
 
 if __name__ == "__main__":
+    seed_everything(SEED)
     
+    # generator = Generator(latent_dim=LATENT_DIM).to(device) # mlp generator
+    # generator = ConvGenerator(latent_dim=LATENT_DIM).to(device) # conv generator
+    generator = DeepConvGenerator(latent_dim=LATENT_DIM).to(device) # conv generator
     
-    generator = Generator().to(device) # generator
-    
-    
-    discriminator = Discriminator().to(device) # discriminator
+    # discriminator = Discriminator().to(device) # discriminator
+    # discriminator = ConvDiscriminator().to(device)
+    discriminator = LightConvDiscriminator().to(device)
     
     # dataset & dataloader
     os.makedirs("./data/mnist", exist_ok=True) # data download
-    os.makedirs(f"./{EXP_NAME}", exist_ok=True) # for save imgs
+    os.makedirs(f"./result/{EXP_NAME}", exist_ok=True) # for save imgs
     dataloader = DataLoader(
         datasets.FashionMNIST(
             "./data/mnist",
@@ -115,11 +131,10 @@ if __name__ == "__main__":
     
     
     # optimizer
-    # optim_g = torch.optim.Adam(generator.parameters(), lr = LEARNING_RATE)
-    optim_g = get_optimizer(optimizer_name=OPTIM, 
+    optim_g = get_optimizer(optimizer_name=OPTIM, # Adam?
                             model=generator, 
                             learning_rate=LEARNING_RATE)
-    # optim_d = torch.optim.Adam(discriminator.parameters(), lr = LEARNING_RATE)
+    
     optim_d = get_optimizer(optimizer_name=OPTIM, 
                             model=discriminator, 
                             learning_rate=LEARNING_RATE)
@@ -153,21 +168,26 @@ if __name__ == "__main__":
             print(f"    epoch {epoch+1} image save: epoch{epoch+1}_result.png")
             
             generator.eval()
-            z = Variable(torch.randn(9, 100)).to(device)
+            z = Variable(torch.randn(9, LATENT_DIM)).to(device)
             sample_imgs = generator(z)
             sample_imgs = sample_imgs.view(sample_imgs.size(0), 28, 28).unsqueeze(dim=1).data.cpu()
             
             grid = make_grid(sample_imgs, nrow=3, normalize=True).permute(1,2,0).numpy()
+            plt.clf() # clean plt
             plt.imshow(grid)
             plt.axis('off')
-            plt.savefig(f"./{EXP_NAME}/epoch{epoch+1}_result.png")
+            plt.savefig(f"./result/{EXP_NAME}/epoch{epoch+1}_result.png")
     
-    plt.clf() # clean plt
-    plt.plot(range(EPOCHS), total_loss_g, 'b', label="generator loss")
-    plt.plot(range(EPOCHS), total_loss_d, 'r', label="discriminator loss")
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Generator & Discriminator Loss')
-    plt.legend()
-    plt.savefig(f'./loss_plot_{EXP_NAME}.png')
+            plt.clf() # clean plt
+            plt.plot(range(epoch+1), total_loss_g, 'b', label="generator loss")
+            plt.plot(range(epoch+1), total_loss_d, 'r', label="discriminator loss")
+            plt.xlabel('Epoch')
+            plt.ylabel('Loss')
+            plt.title('Generator & Discriminator Loss')
+            plt.legend()
+            plt.savefig(f'./loss_plot_{EXP_NAME}.png')
+    
+    if SAVE_TAG is True:
+        torch.save(generator.state_dict(), f'./result/{EXP_NAME}/_generator.pth')
+        torch.save(discriminator.state_dict(), f'./result/{EXP_NAME}/_discriminator.pth')
 

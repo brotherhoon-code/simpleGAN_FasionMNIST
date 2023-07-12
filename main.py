@@ -21,13 +21,16 @@ from discriminator import Discriminator, ConvDiscriminator, LightConvDiscriminat
 ## hyper params
 SEED = 42
 BATCH_SIZE = 64 * 40
-EPOCHS = 200
-LEARNING_RATE = 1e-4
+EPOCHS = 300
 INFERENCE_INTERVAL = 10
-OPTIM = "AdamW"
-EXP_NAME = "LatentDim2048_DeepConvGenerator_LightConvDiscriminator"
+LATENT_DIM = 2**12
+EXP_NAME = f"LatentDim{LATENT_DIM}_DeepConvGenerator_LightConvDiscriminator"
+
+LEARNING_RATE_G = 1e-4
+LEARNING_RATE_D = 1e-4 * 0.5
+OPTIM_G = "AdamW"
+OPTIM_D = "AdamW"
 SAVE_TAG = True
-LATENT_DIM = 2048
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
@@ -37,6 +40,7 @@ transform = transforms.Compose(
      ]
 )
 
+# setting seed
 def seed_everything(seed: int):
     import random, os
     import numpy as np
@@ -93,7 +97,7 @@ def discriminator_step(generator, discriminator, optim_d, criterion:nn.BCELoss, 
     loss_fake = criterion(preds, 
                           Variable(torch.zeros(sample_batch_size)).unsqueeze(dim=1).to(device))
     
-    loss_d = (loss_real + loss_fake) * 0.5 # mean
+    loss_d = loss_real + loss_fake
     loss_d.backward()
     optim_d.step()
     return loss_d.data
@@ -101,6 +105,7 @@ def discriminator_step(generator, discriminator, optim_d, criterion:nn.BCELoss, 
     
 
 if __name__ == "__main__":
+    # set seed
     seed_everything(SEED)
     
     # generator = Generator(latent_dim=LATENT_DIM).to(device) # mlp generator
@@ -114,6 +119,8 @@ if __name__ == "__main__":
     # dataset & dataloader
     os.makedirs("./data/mnist", exist_ok=True) # data download
     os.makedirs(f"./result/{EXP_NAME}", exist_ok=True) # for save imgs
+    
+    # make dataloader
     dataloader = DataLoader(
         datasets.FashionMNIST(
             "./data/mnist",
@@ -123,21 +130,19 @@ if __name__ == "__main__":
         ),
         batch_size=BATCH_SIZE,
         shuffle=True,
-    ) # make dataloader
-    
+    ) 
     
     # loss func
     criterion = nn.BCELoss()
     
-    
     # optimizer
-    optim_g = get_optimizer(optimizer_name=OPTIM, # Adam?
+    optim_g = get_optimizer(optimizer_name=OPTIM_G, # Adam?
                             model=generator, 
-                            learning_rate=LEARNING_RATE)
+                            learning_rate=LEARNING_RATE_G)
     
-    optim_d = get_optimizer(optimizer_name=OPTIM, 
+    optim_d = get_optimizer(optimizer_name=OPTIM_D, 
                             model=discriminator, 
-                            learning_rate=LEARNING_RATE)
+                            learning_rate=LEARNING_RATE_D)
 
     # total loss
     total_loss_d = []

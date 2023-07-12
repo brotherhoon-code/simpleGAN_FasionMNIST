@@ -1,8 +1,9 @@
 # personal
 *.png  
-result  
-data  
+result/*  
+data/*  
 memo.ipynb  
+*.out
 
 
 # Byte-compiled / optimized / DLL files
